@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>精读台 · 语音朗读 + 逐句翻译</title>
+<meta name="description" content="朗读英文文章，逐句翻译，点击句子看语法解析，点击单词看音标与释义，自动标出固定搭配。" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f766e'/%3E%3Ctext x='32' y='45' font-size='38' font-family='Georgia,serif' fill='%23ffffff' text-anchor='middle'%3E%E7%B2%BE%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">精</span>
+    <div class="brand-text">
+      <h1>精读台</h1>
+      <p>朗读 · 逐句翻译 · 点击解析 · 固定搭配</p>
+    </div>
+  </div>
+
+  <div class="topbar-actions">
+    <button id="btn-import" class="btn ghost">导入文章</button>
+    <button id="btn-samples" class="btn ghost">示例</button>
+    <button id="btn-words" class="btn ghost">生词本<span id="word-count" class="badge">0</span></button>
+    <button id="btn-settings" class="btn ghost" title="设置">设置</button>
+  </div>
+</header>
+
+<section class="player">
+  <div class="player-left">
+    <button id="btn-prev" class="icon-btn" title="上一句 (←)">◀</button>
+    <button id="btn-play" class="play-btn" title="播放/暂停 (空格)">
+      <span id="play-icon">▶</span>
+    </button>
+    <button id="btn-next" class="icon-btn" title="下一句 (→)">▶</button>
+    <div class="progress">
+      <span id="progress-label">0 / 0</span>
+    </div>
+  </div>
+
+  <div class="player-right">
+    <label class="ctl">
+      <span>语速</span>
+      <input id="rate" type="range" min="0.5" max="1.5" step="0.05" value="0.9" />
+      <b id="rate-label">0.90×</b>
+    </label>
+    <label class="ctl">
+      <span>音色</span>
+      <select id="voice"></select>
+    </label>
+    <label class="ctl switch">
+      <input id="bilingual" type="checkbox" checked />
+      <span>双语对照</span>
+    </label>
+  </div>
+</section>
+
+<main class="layout">
+  <section class="reader-wrap">
+    <div class="article-head">
+      <input id="article-title" class="article-title" value="" placeholder="未命名文章" />
+      <span class="article-meta" id="article-meta"></span>
+    </div>
+    <div id="reader" class="reader"></div>
+  </section>
+
+  <aside class="panel" id="panel">
+    <div class="panel-inner" id="panel-inner"></div>
+  </aside>
+</main>
+
+<!-- 单词卡 -->
+<div id="wordcard" class="wordcard hidden" aria-live="polite"></div>
+
+<!-- 设置 -->
+<div id="modal-settings" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button class="icon-btn close" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <section class="field-group">
+        <h3>翻译服务</h3>
+        <label class="radio"><input type="radio" name="provider" value="mymemory" checked />
+          <div><b>免费接口（MyMemory）</b><small>无需设置，开箱可用。每天有免费额度，长文章可能较慢。</small></div>
+        </label>
+        <label class="radio"><input type="radio" name="provider" value="ai" />
+          <div><b>自定义 AI（OpenAI 兼容接口）</b><small>翻译更准确，还能给出更细的语法讲解。需要你自己的 API Key。</small></div>
+        </label>
+
+        <div id="ai-fields" class="ai-fields">
+          <label>接口地址<input id="ai-base" placeholder="https://api.deepseek.com/v1" /></label>
+          <label>模型<input id="ai-model" placeholder="deepseek-chat" /></label>
+          <label>API Key<input id="ai-key" type="password" placeholder="sk-..." /></label>
+          <p class="hint">Key 只保存在你自己的浏览器里，不会上传到任何服务器。注意：有些服务不允许浏览器直接调用（CORS），保存后可以点“测试连接”验证。</p>
+          <button id="btn-test-ai" class="btn">测试连接</button>
+          <span id="ai-test-result" class="test-result"></span>
+        </div>
+      </section>
+
+      <section class="field-group">
+        <h3>朗读</h3>
+        <p class="hint">朗读使用浏览器自带的语音引擎（Edge / Chrome 效果最好）。如果音色列表里没有英文音色，请在系统设置里安装英文语音包。</p>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>关闭</button>
+      <button id="btn-save-settings" class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入 -->
+<div id="modal-import" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>导入文章</h2>
+      <button class="icon-btn close" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">标题（可选）</label>
+      <input id="import-title" class="text-input" placeholder="例如：The Economist · 2026-10" />
+      <label class="field-label">英文正文（粘贴文本，建议保留段落空行）</label>
+      <textarea id="import-text" class="text-area" placeholder="Paste your English article here..."></textarea>
+      <div class="row">
+        <label class="btn ghost file-btn">选择 .txt 文件<input id="import-file" type="file" accept=".txt,.md,text/plain" hidden /></label>
+        <span id="import-count" class="hint"></span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button id="btn-import-ok" class="btn primary">开始精读</button>
+    </div>
+  </div>
+</div>
+
+<!-- 示例 -->
+<div id="modal-samples" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>示例文章</h2>
+      <button class="icon-btn close" data-close>✕</button>
+    </div>
+    <div class="modal-body" id="samples-list"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 生词本 -->
+<div id="modal-words" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>生词本</h2>
+      <button class="icon-btn close" data-close>✕</button>
+    </div>
+    <div class="modal-body" id="words-list"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="btn-export-words">导出 TXT</button>
+      <button class="btn ghost" data-close>关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="./data.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
