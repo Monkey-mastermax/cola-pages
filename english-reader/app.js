@@ -980,7 +980,7 @@
     card.style.top = top + 'px';
   }
 
-  const FUNC_WORDS = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'as', 'and', 'or', 'but', 'if', 'is', 'are', 'was', 'were', 'be', 'been', 'am', 'it', 'its', 'this', 'that', 'these', 'those', 'he', 'she', 'they', 'we', 'you', 'i', 'his', 'her', 'their', 'our', 'my', 'your', 'not', 'so', 'than', 'then', 'there', 'here', 'do', 'does', 'did', 'have', 'has', 'had', 'them', 'him', 'us']);
+  const FUNC_WORDS = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'as', 'and', 'or', 'but', 'if', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am', 'do', 'does', 'did', 'have', 'has', 'had', 'it', 'its', 'he', 'she', 'they', 'we', 'you', 'i', 'his', 'her', 'their', 'our', 'my', 'your', 'them', 'him', 'us', 'this', 'that', 'these', 'those', 'not', 'than']);
 
   function trimCache() {
     const keys = Object.keys(state.wordCache);
