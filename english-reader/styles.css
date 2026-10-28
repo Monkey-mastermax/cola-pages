@@ -340,6 +340,25 @@ body.bilingual .zh { display: block; }
   }
 }
 
+@media (max-width: 640px) {
+  body { overflow-x: hidden; }
+  .topbar { flex-wrap: wrap; gap: 10px; }
+  .brand-text p { display: none; }
+  .topbar-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
+  .topbar-actions .btn { padding: 6px 10px; font-size: 12.5px; }
+  .player { flex-direction: column; align-items: stretch; gap: 12px; }
+  .player-left { justify-content: flex-start; }
+  .player-right { justify-content: space-between; gap: 10px; }
+  .ctl select { max-width: 128px; }
+  .ctl input[type=range] { width: 76px; }
+  .ctl { font-size: 11.5px; gap: 6px; }
+  .article-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .article-meta { align-self: flex-start; }
+  .en { font-size: 17px; line-height: 1.72; }
+  .sent { margin: 0 -6px 4px -10px; padding: 6px 10px 6px 12px; }
+  .panel-inner { padding: 16px; }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #14171a; --paper-2: #1b1f23; --ink: #e8eaec; --ink-soft: #b6bcc2;
