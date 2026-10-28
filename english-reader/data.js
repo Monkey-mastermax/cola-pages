@@ -478,6 +478,15 @@ window.COLA_DATA = (function () {
 
   const samples = [
     {
+      title: "Tom 的小花园",
+      level: "小学 · 课标词友好",
+      text: `Tom is a small boy. He has a small garden behind his house. Every morning, he opens the door and walks to the garden. He waters the flowers and the green grass. His dog runs after a red ball in the sun.
+
+Tom likes to read under a big tree. He sees a yellow bird and a blue butterfly. The bird sings a happy song. Tom smiles and eats an apple.
+
+After school, Tom and his sister play in the garden. They find a little cat near the wall. The cat is cold, so Tom takes it home. Now the cat lives with Tom and his family.`,
+    },
+    {
       title: "为什么我们读完就忘",
       text: `Most of us finish a chapter and discover, an hour later, that we can hardly recall a single idea from it. The words went in, but nothing stayed. This is not a failure of memory; it is a failure of method.
 

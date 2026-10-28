@@ -53,6 +53,22 @@
       <input id="bilingual" type="checkbox" checked />
       <span>双语对照</span>
     </label>
+    <label class="ctl switch">
+      <input id="dictation" type="checkbox" />
+      <span>听写模式</span>
+    </label>
+    <label class="ctl">
+      <span>课标</span>
+      <select id="course-tier">
+        <option value="primary">小学</option>
+        <option value="junior">初中</option>
+        <option value="senior">高中</option>
+      </select>
+    </label>
+    <label class="ctl switch">
+      <input id="course-only" type="checkbox" checked />
+      <span>只标课标词</span>
+    </label>
   </div>
 </section>
 
@@ -168,6 +184,7 @@
 <div id="toast" class="toast"></div>
 
 <script src="./data.js"></script>
+<script src="./course.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

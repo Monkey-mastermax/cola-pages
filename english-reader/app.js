@@ -35,6 +35,9 @@
     rate: LS.get('rate', 0.9),
     voiceURI: LS.get('voiceURI', ''),
     bilingual: LS.get('bilingual', true),
+    dictation: false,
+    courseTier: LS.get('courseTier', 'primary'),
+    courseOnly: LS.get('courseOnly', true),
     provider: LS.get('provider', 'mymemory'),
     ai: LS.get('ai', { base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', key: '' }),
     words: LS.get('words', []),
@@ -203,6 +206,28 @@
     });
   }
 
+  /* ============================ 课标词库 ============================
+   * 课程要考的词（教育部课标词汇表），来自 window.COURSE_TIERS。
+   * COURSE_SET 为当前学段词表（含屈折变形）的集合，按学段缓存。 */
+  let COURSE_SET = null;
+  let COURSE_TIER_KEY = null;
+  function ensureCourseSet() {
+    const tiers = window.COURSE_TIERS || {};
+    const t = tiers[state.courseTier] || tiers.primary;
+    if (COURSE_TIER_KEY === state.courseTier && COURSE_SET) return;
+    COURSE_TIER_KEY = state.courseTier;
+    const set = new Set();
+    if (!t) { COURSE_SET = set; return; }
+    const words = (t.words || '').toLowerCase().split(/\s+/).filter(Boolean);
+    words.forEach((w) => {
+      if (!w) return;
+      set.add(w);
+      const forms = IRR[w] || regularForms(w);
+      forms.forEach((f) => set.add(f));
+    });
+    COURSE_SET = set;
+  }
+
   /* ============================ 分句 ============================ */
   const ABBR = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'St', 'Jr', 'Sr', 'vs', 'etc', 'e\\.g', 'i\\.e', 'a\\.m', 'p\\.m', 'No', 'Fig', 'Inc', 'Ltd'];
   function splitSentences(text) {
@@ -253,20 +278,24 @@
     }
     return found;
   }
-  function buildSpans(text, cols, allowCols, startMap) {
+  function buildSpans(text, marks, startMap) {
     let html = '';
     let i = 0;
-    const sorted = cols.filter((c) => c.s >= 0 && c.e <= text.length).sort((a, b) => a.s - b.s);
-    let ci = 0;
+    const sorted = marks.filter((m) => m.s >= 0 && m.e <= text.length).sort((a, b) => a.s - b.s);
+    let mi = 0;
     while (i < text.length) {
-      const c = sorted[ci];
-      if (allowCols && c && c.s === i) {
-        const seg = text.slice(c.s, c.e);
-        const segMap = new Map();
-        tokens(seg).forEach((t) => segMap.set(t.s, t));
-        html += '<span class="col" data-c="' + attr(c.key) + '" title="' + attr(c.entry.meaning) + '">' +
-          buildSpans(seg, [], false, segMap) + '</span>';
-        i = c.e; ci++;
+      const m = sorted[mi];
+      if (m && m.s === i) {
+        const seg = text.slice(m.s, m.e);
+        if (m.type === 'col') {
+          const segMap = new Map();
+          tokens(seg).forEach((t) => segMap.set(t.s, t));
+          html += '<span class="col" data-c="' + attr(m.key) + '" title="' + attr(m.entry.meaning) + '">' +
+            buildSpans(seg, [], segMap) + '</span>';
+        } else { // cw：课标词
+          html += '<span class="cw" data-w="' + attr(m.w) + '" title="课标词（课程要考的词）">' + esc(seg) + '</span>';
+        }
+        i = m.e; mi++;
         continue;
       }
       const t = startMap.get(i);
@@ -282,10 +311,35 @@
   }
   function annotate(text) {
     const tk = tokens(text);
-    const cols = findCollocations(tk);
+    let cols = findCollocations(tk);
+    let cwList = [];
+    if (state.courseOnly) {
+      ensureCourseSet();
+      // 只保留「首词属于课标词」的搭配
+      cols = cols.filter((c) => COURSE_SET.has(c.key.split(' ')[0]));
+      // 标出落在搭配之外的课标词
+      const covered = new Set();
+      cols.forEach((c) => { for (let p = c.s; p < c.e; p++) covered.add(p); });
+      const seen = new Set();
+      tk.forEach((t) => {
+        for (let p = t.s; p < t.e; p++) { if (covered.has(p)) return; }
+        const w = t.w.toLowerCase().replace(/[’]/g, "'");
+        if (COURSE_SET.has(w) && !seen.has(w)) {
+          seen.add(w);
+          cwList.push({ s: t.s, e: t.e, w: t.w });
+        }
+      });
+    }
     const startMap = new Map();
     tk.forEach((t) => startMap.set(t.s, t));
-    return { html: buildSpans(text, cols, true, startMap), cols: cols.map((c) => c.key) };
+    const marks = [];
+    cols.forEach((c) => marks.push({ s: c.s, e: c.e, type: 'col', key: c.key, entry: c.entry }));
+    cwList.forEach((c) => marks.push({ s: c.s, e: c.e, type: 'cw', w: c.w }));
+    return {
+      html: buildSpans(text, marks, startMap),
+      cols: cols.map((c) => c.key),
+      cwList: cwList.map((c) => c.w),
+    };
   }
   function collocEntries(keys) {
     const seen = new Set();
@@ -657,6 +711,7 @@
     reader.innerHTML = '';
     let lastPara = -1;
     let paraEl = null;
+    let cwTotal = 0;
     state.sentences.forEach((s, i) => {
       if (s.para !== lastPara) {
         paraEl = document.createElement('div');
@@ -665,6 +720,7 @@
         lastPara = s.para;
       }
       const a = annotate(s.en);
+      cwTotal += a.cwList.length;
       const el = document.createElement('div');
       el.className = 'sent';
       el.dataset.i = String(i);
@@ -677,7 +733,7 @@
     // 固定搭配逐个挂上（用于点选）
     $$('.sent').forEach((el) => {
       el.addEventListener('click', (ev) => {
-        const w = ev.target.closest('.w');
+        const w = ev.target.closest('.w, .cw');
         const col = ev.target.closest('.col');
         const i = Number(el.dataset.i);
         if (w) {
@@ -700,10 +756,71 @@
       });
     });
     $('#progress-label').textContent = '0 / ' + state.sentences.length;
-    $('#article-meta').textContent = state.sentences.length + ' 句 · ' +
-      (state.sentences.map((s) => s.en).join(' ').match(/[A-Za-z']+/g) || []).length + ' 词';
+    const wordN = (state.sentences.map((s) => s.en).join(' ').match(/[A-Za-z']+/g) || []).length;
+    $('#article-meta').textContent = state.sentences.length + ' 句 · ' + wordN + ' 词' +
+      (state.courseOnly ? ' · ' + cwTotal + ' 课标词' : '');
     document.title = (state.title || '精读台') + ' · 精读台';
     $('#article-title').value = state.title || '';
+    reader.classList.toggle('dictation-on', state.dictation);
+    reader.classList.toggle('cw-on', state.courseOnly);
+    if (state.dictation) attachDictation();
+  }
+
+  /* ============================ 听写模式 ============================ */
+  function normalizeWords(t) {
+    return (t || '').toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  }
+  function attachDictation() {
+    $$('.sent').forEach((el) => {
+      const i = Number(el.dataset.i);
+      if ($('.dict-box', el)) return;
+      const box = document.createElement('div');
+      box.className = 'dict-box';
+      box.innerHTML =
+        '<textarea class="dict-input" rows="2" placeholder="听一句，写一句…"></textarea>' +
+        '<div class="dict-actions">' +
+          '<button class="dict-submit btn">提交对照</button>' +
+          '<button class="dict-listen btn ghost">再听一次</button>' +
+        '</div>' +
+        '<div class="dict-result"></div>';
+      el.appendChild(box);
+      $('.dict-submit', box).addEventListener('click', () => dictCheck(i));
+      $('.dict-listen', box).addEventListener('click', (ev) => { ev.stopPropagation(); speak(i, { silent: true }); });
+      box.addEventListener('click', (ev) => ev.stopPropagation());
+    });
+  }
+  function startDictation(i) {
+    if (!state.sentences.length) return;
+    state.dictation = true;
+    if (i == null) i = state.current < 0 ? 0 : state.current;
+    selectSentence(i, { scroll: true });
+    speak(i, { silent: true });
+    const box = $('.sent[data-i="' + i + '"] .dict-box');
+    if (box) { const ta = $('.dict-input', box); if (ta) ta.focus(); }
+  }
+  function dictCheck(i) {
+    const s = state.sentences[i];
+    if (!s) return;
+    const box = $('.sent[data-i="' + i + '"] .dict-box');
+    if (!box) return;
+    const input = $('.dict-input', box).value;
+    const target = normalizeWords(s.en);
+    const got = normalizeWords(input);
+    let html = '', correct = 0;
+    const total = target.length;
+    const maxLen = Math.max(target.length, got.length);
+    for (let k = 0; k < maxLen; k++) {
+      const t = target[k], g = got[k];
+      if (t && g && t === g) { html += '<span class="d-ok">' + esc(g) + '</span> '; correct++; }
+      else if (t && !g) { html += '<span class="d-miss">' + esc(t) + '</span> '; }
+      else if (!t && g) { html += '<span class="d-extra">' + esc(g) + '</span> '; }
+      else { html += '<span class="d-wrong">' + esc(g) + '</span> '; }
+    }
+    const score = total ? Math.round((correct / total) * 100) : 0;
+    box.querySelector('.dict-result').innerHTML =
+      '<p class="d-score">正确率 ' + score + '%（' + correct + '/' + total + '）</p>' +
+      '<p class="d-detail">' + html + '</p>' +
+      '<p class="d-answer"><b>原文：</b>' + esc(s.en) + '</p>';
   }
 
   /* ============================ 句子选择 & 面板 ============================ */
@@ -741,10 +858,17 @@
 
     const tagsHTML = g.tags.map((t, idx) => '<span class="tag' + (idx ? ' alt' : '') + '">' + esc(t) + '</span>').join('');
 
+    const cw = a.cwList || [];
+    const cwHTML = (state.courseOnly && cw.length)
+      ? '<div class="p-cw"><span class="cw-label">本课标词 · ' + cw.length + '</span>' +
+        cw.map((w) => '<button class="cw-chip" data-w="' + attr(w) + '">' + esc(w) + '</button>').join('') + '</div>'
+      : '';
+
     $('#panel-inner').innerHTML =
       '<div class="p-sec">' +
         '<h3>原句</h3>' +
         '<p class="p-original">' + a.html + '</p>' +
+        cwHTML +
       '</div>' +
       '<div class="p-sec">' +
         '<h3>中文翻译</h3>' +
@@ -776,7 +900,10 @@
     $$('.colloc-item', $('#panel-inner')).forEach((el) => {
       el.addEventListener('click', () => speakWord(el.dataset.phrase));
     });
-    $$('.p-original .w', $('#panel-inner')).forEach((w) => {
+    $$('.cw-chip', $('#panel-inner')).forEach((el) => {
+      el.addEventListener('click', () => openWordCard(el.dataset.w, el));
+    });
+    $$('.p-original .w, .p-original .cw', $('#panel-inner')).forEach((w) => {
       w.addEventListener('click', () => openWordCard(w.dataset.w, w));
     });
     if (opts.focusColloc) {
@@ -1169,6 +1296,7 @@
       '<li>点任意一句 → 右侧给出中文翻译和语法结构拆解。</li>' +
       '<li>点任意一个单词 → 音标、中文释义、英文释义、发音。</li>' +
       '<li>带 <span style="border-bottom:1.5px dotted var(--amber);color:var(--amber)">虚线下划</span> 的是固定搭配，点一下能看到含义。</li>' +
+      '<li>勾选「只标课标词」后，<span style="border-bottom:2px solid var(--accent)">加粗实线下划</span> 的是本课标词（教育部课标词汇表），只标课程要考的词；可在「课标」里切换小学／初中／高中。</li>' +
       '<li>空格键播放／暂停，← → 切换句子。</li>' +
       '</ul></div>';
   }
@@ -1181,6 +1309,7 @@
     const list = $('#samples-list');
     list.innerHTML = DATA.samples.map((s, i) =>
       '<div class="sample-item" data-sample="' + i + '"><b>' + esc(s.title) + '</b>' +
+      (s.level ? '<span class="sample-level">' + esc(s.level) + '</span>' : '') +
       '<small>' + esc(s.text.slice(0, 90).replace(/\s+/g, ' ')) + '…</small></div>').join('');
     $$('.sample-item', list).forEach((el) => {
       el.addEventListener('click', () => {
@@ -1257,11 +1386,32 @@
       state.voiceURI = e.target.value;
       LS.set('voiceURI', state.voiceURI);
     });
+    $('#dictation').addEventListener('change', (e) => {
+      state.dictation = e.target.checked;
+      LS.set('dictation', state.dictation);
+      renderReader();
+      if (state.dictation && state.sentences.length) startDictation(0);
+    });
     $('#bilingual').addEventListener('change', (e) => {
       state.bilingual = e.target.checked;
       LS.set('bilingual', state.bilingual);
       document.body.classList.toggle('bilingual', state.bilingual);
       if (state.bilingual) backfillTranslations();
+    });
+    $('#course-only').addEventListener('change', (e) => {
+      state.courseOnly = e.target.checked;
+      LS.set('courseOnly', state.courseOnly);
+      if (state.courseOnly) ensureCourseSet();
+      renderReader();
+      if (state.current >= 0) renderPanel(state.current, {});
+    });
+    $('#course-tier').addEventListener('change', (e) => {
+      state.courseTier = e.target.value;
+      LS.set('courseTier', state.courseTier);
+      COURSE_TIER_KEY = null; // 强制重建词集
+      if (state.courseOnly) ensureCourseSet();
+      renderReader();
+      if (state.current >= 0) renderPanel(state.current, {});
     });
 
     // 标题
@@ -1387,6 +1537,9 @@
     bind();
     document.body.classList.toggle('bilingual', state.bilingual);
     $('#bilingual').checked = state.bilingual;
+    $('#course-only').checked = state.courseOnly;
+    $('#course-tier').value = state.courseTier;
+    if (state.courseOnly) ensureCourseSet();
     $('#rate').value = state.rate;
     $('#rate-label').textContent = Number(state.rate).toFixed(2) + '×';
     updateWordCount();
