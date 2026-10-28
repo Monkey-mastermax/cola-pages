@@ -27,6 +27,8 @@
   </div>
 </header>
 
+<div id="status-banner" class="status-banner hidden" role="status"></div>
+
 <section class="player">
   <div class="player-left">
     <button id="btn-prev" class="icon-btn" title="上一句 (←)">◀</button>
@@ -49,6 +51,7 @@
       <span>音色</span>
       <select id="voice"></select>
     </label>
+    <span id="voice-hint" class="voice-hint" style="display:none">未检测到英文语音包，朗读可能无声</span>
     <label class="ctl switch">
       <input id="bilingual" type="checkbox" checked />
       <span>双语对照</span>

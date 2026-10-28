@@ -45,7 +45,10 @@
     analysis: {},          // index -> {translation, grammar, collocs, source}
     tcache: {},            // text -> translation
     cardWord: null,
+    noEnglish: false,      // 浏览器/系统没有英文语音包
   };
+  let NET_FAIL = false;    // 联网翻译/词典接口连不上（离线或被墙）
+  let netBannerOpen = false;
 
   /* ============================ 工具 ============================ */
   function esc(s) {
@@ -64,6 +67,34 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2600);
+  }
+
+  // 联网失败横幅：只弹一次，避免 13 个句子排队全失败时刷屏
+  function showNetBanner(msg) {
+    const b = document.getElementById('status-banner');
+    if (!b) return;
+    b.classList.remove('hidden');
+    b.classList.add('error');
+    b.innerHTML =
+      '<span>' + esc(msg) + '</span>' +
+      '<button id="banner-retry" class="banner-btn">重试</button>' +
+      '<button id="banner-ai" class="banner-btn ghost">用自定义 AI</button>' +
+      '<button id="banner-close" class="banner-x">✕</button>';
+    const r = document.getElementById('banner-retry');
+    if (r) r.onclick = () => {
+      NET_FAIL = false; netBannerOpen = false; b.classList.add('hidden');
+      if (state.bilingual && state.sentences.length) {
+        ensureSentenceTranslation(state.current >= 0 ? state.current : 0);
+      }
+    };
+    const a = document.getElementById('banner-ai');
+    if (a) a.onclick = () => { syncSettingsUI(); openModal('modal-settings'); };
+    const x = document.getElementById('banner-close');
+    if (x) x.onclick = () => { b.classList.add('hidden'); };
+  }
+  function markNetFail(reason) {
+    NET_FAIL = true;
+    if (!netBannerOpen) { netBannerOpen = true; showNetBanner(reason); }
   }
 
   // 带超时的 JSON 请求：避免一个挂死的请求把整个翻译队列堵住
@@ -238,7 +269,13 @@
       ABBR.forEach((a, i) => {
         s = s.replace(new RegExp('(^|\\s)(' + a + ')\\.', 'g'), '$1$2\u0001');
       });
-      const parts = s.split(/(?<=[.!?…]["'”’)\]]?)\s+/);
+      // 不使用 lookbehind（旧版 Safari / WebView 不支持，会整脚本崩溃），
+      // 改用带捕获组的 split，把句末标点+空白并回上一句。
+      const parts = s.split(/([.!?…]["'”’)\]]?\s+)/).reduce((acc, piece, i) => {
+        if (i % 2 === 1) { if (acc.length) acc[acc.length - 1] += piece; else acc.push(piece); }
+        else if (piece) acc.push(piece);
+        return acc;
+      }, []);
       parts.forEach((raw) => {
         const seg = raw.replace(/\u0001/g, '.').trim();
         if (!seg) return;
@@ -523,10 +560,11 @@
     const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|zh-CN';
     let j;
     try {
-      j = await fetchJSON(url, null, 12000);
+      j = await fetchJSON(url, null, 6000);
     } catch (e) {
-      if (e.name === 'AbortError') throw new Error('翻译接口超时');
+      if (e.name === 'AbortError') { markNetFail('翻译接口超时（网络较慢或被拦截）。翻译/查词需要联网；或在“设置”里填自定义 AI（如 DeepSeek）后离线可用。'); throw new Error('翻译接口超时'); }
       if (e.status === 429 || e.status === 403) throw new Error('免费翻译额度用完了（次日恢复），或到“设置”改用自定义 AI 接口');
+      markNetFail('翻译接口连不上（' + (e.message || '网络问题') + '）。翻译/查词需要联网；或在“设置”里填自定义 AI（如 DeepSeek）。');
       throw new Error('翻译接口连不上（' + (e.message || '网络问题') + '）');
     }
     const t = j && j.responseData && j.responseData.translatedText;
@@ -583,6 +621,10 @@
   async function translateAll(text, priority) {
     if (state.tcache[text]) return { text: state.tcache[text], source: 'cache' };
     if (inflight.has(text)) return inflight.get(text);
+    // 联网已确认连不上时，直接快退，避免每个句子都干等 6 秒
+    if (NET_FAIL && !(state.provider === 'ai' && state.ai.key)) {
+      throw new Error('翻译服务连不上（需要联网，或在设置里填自定义 AI）');
+    }
     const task = (async () => {
       if (state.provider === 'ai' && state.ai.key) {
         try {
@@ -609,13 +651,22 @@
 
   function loadVoices() {
     if (!synth) return;
-    voices = synth.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang));
-    if (!voices.length) voices = synth.getVoices();
+    const all = synth.getVoices() || [];
+    voices = all.filter((v) => /^en([-_]|$)/i.test(v.lang));
+    if (!voices.length) voices = all;           // 退而求其次用全部音色
+    // 有音色但一个英文的都没有 → 朗读多半会无声
+    state.noEnglish = !!all.length && !all.some((v) => /^en([-_]|$)/i.test(v.lang));
+    const hint = document.getElementById('voice-hint');
+    if (hint) hint.style.display = state.noEnglish ? '' : 'none';
+    if (state.noEnglish && !window.__voiceWarned) {
+      window.__voiceWarned = true;
+      toast('未检测到英文语音包，朗读可能无声。请到系统设置安装英文语音，或换 Chrome / Edge 打开');
+    }
     const sel = $('#voice');
     const prev = state.voiceURI;
     sel.innerHTML = '';
     if (!voices.length) {
-      sel.innerHTML = '<option value="">未找到英文音色</option>';
+      sel.innerHTML = '<option value="">未找到音色（朗读可能无声）</option>';
       return;
     }
     voices.forEach((v) => {
@@ -625,7 +676,7 @@
       sel.appendChild(o);
     });
     let pick = voices.find((v) => v.voiceURI === prev);
-    if (!pick) pick = voices.find((v) => /google|natural|online/i.test(v.name)) || voices[0];
+    if (!pick) pick = voices.find((v) => /en|google|natural|online/i.test(v.name)) || voices[0];
     state.voiceURI = pick.voiceURI;
     sel.value = pick.voiceURI;
   }
@@ -643,18 +694,35 @@
     $('#play-icon').textContent = state.playing ? '❚❚' : '▶';
   }
 
-  function speak(index, opts) {
+  // 等语音列表就绪：首次点击时音色可能还没加载完，Chrome 会哑火
+  function waitForVoices(ms) {
+    if (voices.length || !synth) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => { if (done) return; done = true; try { synth.removeEventListener('voiceschanged', finish); } catch (e) {} resolve(); };
+      try { synth.addEventListener('voiceschanged', finish); } catch (e) {}
+      setTimeout(finish, ms || 1500);
+    });
+  }
+
+  async function speak(index, opts) {
     opts = opts || {};
     if (!synth) { toast('当前浏览器不支持语音朗读，换个浏览器试试'); return; }
     const s = state.sentences[index];
     if (!s) return;
+    // 首句前若语音列表还没加载完，等一下再念，避免 Chrome 首句哑火
+    if (!voices.length) { await waitForVoices(1500); loadVoices(); }
+    const v = currentVoice();
+    if (!v && state.noEnglish) {
+      toast('未检测到英文语音包，无法朗读。请到系统设置安装英文语音，或换 Chrome / Edge 打开');
+    }
     const seq = ++state.speakSeq;
     synth.cancel();
     if (synth.paused) synth.resume();
     selectSentence(index, { scroll: true, silent: opts.silent });
     const u = new SpeechSynthesisUtterance(s.en);
-    const v = currentVoice();
-    if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = 'en-US'; }
+    const vv = currentVoice();
+    if (vv) { u.voice = vv; u.lang = vv.lang; } else { u.lang = 'en-US'; }
     u.rate = state.rate;
     u.pitch = 1;
 
@@ -893,6 +961,8 @@
     if (btnR) btnR.addEventListener('click', () => {
       delete state.analysis[i];
       delete state.tcache[s.en];
+      NET_FAIL = false; netBannerOpen = false;
+      const b = document.getElementById('status-banner'); if (b) b.classList.add('hidden');
       fetchSentenceTranslation(i, true);
     });
     const btnRead = $('#btn-read-sentence');
@@ -1002,7 +1072,7 @@
 
   async function fetchDatamuse(w) {
     try {
-      const j = await fetchJSON('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&md=d&max=1', null, 8000);
+      const j = await fetchJSON('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&md=d&max=1', null, 4000);
       const e = Array.isArray(j) ? j[0] : null;
       if (!e || !e.defs) return null;
       const defs = e.defs.slice(0, 2).map((d) => {
@@ -1017,7 +1087,7 @@
 
   // 词典源 1：freedictionaryapi.com（Wiktionary 衍生，音标齐全）
   async function fetchFreeDict(w) {
-    const j = await fetchJSON('https://freedictionaryapi.com/api/v1/entries/en/' + encodeURIComponent(w), null, 9000);
+    const j = await fetchJSON('https://freedictionaryapi.com/api/v1/entries/en/' + encodeURIComponent(w), null, 5000);
     const entries = (j && j.entries) || [];
     if (!entries.length) return null;
     const sorted = entries.slice().sort((a, b) =>
@@ -1042,7 +1112,7 @@
 
   // 词典源 2：dictionaryapi.dev
   async function fetchDictApi(w) {
-    const j = await fetchJSON('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(w), null, 8000);
+    const j = await fetchJSON('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(w), null, 5000);
     const e = Array.isArray(j) ? j[0] : null;
     if (!e) return null;
     const ipa = e.phonetic || ((e.phonetics || []).map((p) => p.text).find(Boolean)) || '';
@@ -1215,7 +1285,7 @@
       (d.ex ? '<p class="wc-ex">' + esc(d.ex) + '</p>' : '')).join('');
     const nothing = !e.ipa && !(e.defs && e.defs.length);
     const failHTML = (!loading && nothing)
-      ? '<p class="wc-def" style="color:var(--danger)">词典接口这次没读到（网络或限流）。<button class="link-btn" data-wc-retry>重试</button></p>'
+      ? '<p class="wc-def" style="color:var(--danger)">词典接口这次没读到（需要联网，或接口限流）。<button class="link-btn" data-wc-retry>重试</button></p>'
       : '';
     const inBook = state.words.some((x) => x.w === word);
     return '<button class="icon-btn wc-close" data-wc-close>✕</button>' +
@@ -1244,6 +1314,8 @@
     if (retry) retry.addEventListener('click', () => {
       delete state.wordCache[word];
       LS.set('wordCache3', state.wordCache);
+      NET_FAIL = false; netBannerOpen = false;
+      const b = document.getElementById('status-banner'); if (b) b.classList.add('hidden');
       const el = $('.w[data-w="' + word + '"]');
       openWordCard(word, el || card);
     });
@@ -1286,7 +1358,9 @@
     renderReader();
     $('#panel-inner').innerHTML = emptyPanelHTML();
     state.current = -1;
-    if (state.bilingual) backfillTranslations();
+    // 只先选第一句：本地语法分析立刻可见（证明交互正常），
+    // 其余句子点哪句译哪句，避免离线时 13 句排队干等把页面拖死。
+    if (state.sentences.length) selectSentence(0, { scroll: false });
   }
 
   function emptyPanelHTML() {
@@ -1466,6 +1540,8 @@
       LS.set('provider', state.provider);
       $('#ai-fields').classList.toggle('on', state.provider === 'ai');
       state.tcache = {};
+      NET_FAIL = false; netBannerOpen = false;
+      const b = document.getElementById('status-banner'); if (b) b.classList.add('hidden');
     }));
     $('#btn-save-settings').addEventListener('click', () => {
       state.ai = {
@@ -1476,6 +1552,8 @@
       LS.set('ai', state.ai);
       state.tcache = {};
       state.analysis = {};
+      NET_FAIL = false; netBannerOpen = false;
+      const b = document.getElementById('status-banner'); if (b) b.classList.add('hidden');
       closeModals();
       toast('设置已保存');
       if (state.sentences.length) renderReader();
@@ -1533,19 +1611,28 @@
 
   /* ============================ 启动 ============================ */
   function init() {
-    buildCollocations();
-    bind();
-    document.body.classList.toggle('bilingual', state.bilingual);
-    $('#bilingual').checked = state.bilingual;
-    $('#course-only').checked = state.courseOnly;
-    $('#course-tier').value = state.courseTier;
-    if (state.courseOnly) ensureCourseSet();
-    $('#rate').value = state.rate;
-    $('#rate-label').textContent = Number(state.rate).toFixed(2) + '×';
-    updateWordCount();
-    $('#panel-inner').innerHTML = emptyPanelHTML();
-    const first = DATA.samples[0];
-    if (first) loadArticle(first.text, first.title);
+    try {
+      buildCollocations();
+      bind();
+      document.body.classList.toggle('bilingual', state.bilingual);
+      $('#bilingual').checked = state.bilingual;
+      $('#course-only').checked = state.courseOnly;
+      $('#course-tier').value = state.courseTier;
+      if (state.courseOnly) ensureCourseSet();
+      $('#rate').value = state.rate;
+      $('#rate-label').textContent = Number(state.rate).toFixed(2) + '×';
+      updateWordCount();
+      $('#panel-inner').innerHTML = emptyPanelHTML();
+      const first = DATA.samples[0];
+      if (first) loadArticle(first.text, first.title);
+      else toast('没有可用的示例文章，点“导入文章”粘贴一段英文试试');
+    } catch (e) {
+      console.error(e);
+      const p = document.getElementById('panel-inner');
+      if (p) p.innerHTML = '<div class="panel-hint"><b>页面初始化出错</b><p>' +
+        esc(String((e && e.message) || e)) + '</p>' +
+        '<p>多半是某个脚本加载被拦截。请刷新页面，或换 Chrome / Edge 打开；若仍不行，到浏览器控制台把红色报错发我。</p></div>';
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);

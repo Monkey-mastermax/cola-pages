@@ -354,6 +354,44 @@ body.bilingual .zh { display: block; }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ---------------- 状态横幅（联网 / 语音提示） ---------------- */
+.status-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 24px 0; max-width: 1280px; margin-left: auto; margin-right: auto;
+  padding: 10px 14px; border-radius: 12px;
+  background: #fff6ed; border: 1px solid #f3d6b6; color: #8a4b15;
+  font-size: 13px; line-height: 1.5;
+}
+.status-banner.hidden { display: none; }
+.status-banner span { flex: 1 1 auto; min-width: 0; }
+.status-banner .banner-btn {
+  border: 1px solid #e0a96b; background: #fff; color: #8a4b15;
+  border-radius: 8px; padding: 4px 11px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.status-banner .banner-btn:hover { background: #8a4b15; color: #fff; border-color: #8a4b15; }
+.status-banner .banner-btn.ghost { background: transparent; }
+.status-banner .banner-x {
+  border: none; background: none; color: #b07a3a; font-size: 13px; cursor: pointer; padding: 2px 4px;
+}
+.status-banner.error { background: #fdecec; border-color: #f0c2c2; color: #9a2b22; }
+.status-banner.error .banner-btn { border-color: #d99a9a; color: #9a2b22; }
+.status-banner.error .banner-btn:hover { background: #9a2b22; color: #fff; border-color: #9a2b22; }
+
+.voice-hint {
+  font-size: 12px; color: var(--amber); background: var(--amber-soft);
+  border: 1px solid #f0d9b6; border-radius: 8px; padding: 5px 9px; margin-left: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-banner { background: #2e2316; border-color: #4a3a22; color: #e6b07a; }
+  .status-banner span { color: #e6b07a; }
+  .status-banner .banner-btn { background: #241a10; border-color: #5a4527; color: #e6b07a; }
+  .status-banner .banner-btn:hover { background: #e6b07a; color: #241a10; }
+  .status-banner.error { background: #2e1818; border-color: #5a2a2a; color: #f0a0a0; }
+  .status-banner.error .banner-btn { border-color: #6a3a3a; color: #f0a0a0; }
+  .status-banner.error .banner-btn:hover { background: #f0a0a0; color: #2e1818; }
+}
+
 /* ---------------- 响应式 ---------------- */
 @media (max-width: 940px) {
   .layout { grid-template-columns: 1fr; gap: 20px; padding: 8px 16px 0; }
